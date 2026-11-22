@@ -129,6 +129,48 @@
   .toggles label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
   .presets { display: flex; gap: 6px; flex-wrap: wrap; }
   .presets button { flex: 1 1 30%; padding: 8px 4px; font-size: .8rem; background: #2c3e50; color: #fff; }
+  /* ---------- Camera coach ---------- */
+  .box.hit  { outline: 6px solid #2ecc71; outline-offset: -6px; }
+  .box.miss { outline: 6px solid #e74c3c; outline-offset: -6px; }
+  .dot {
+    position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+    background: #ff3d81; border: 3px solid #fff; z-index: 4; display: none; pointer-events: none;
+    transition: left .08s linear, top .08s linear;
+  }
+  .result { font-size: 1.1rem; font-weight: 700; min-height: 1.4rem; margin-top: 6px; text-align: center; }
+  .result.good { color: #2ecc71; } .result.bad { color: #e74c3c; }
+  .cam-wrap { position: relative; margin-top: 10px; display: none; background: #000; border-radius: 8px; overflow: hidden; }
+  .cam-wrap.show { display: block; }
+  .cam-wrap video { width: 100%; height: auto; display: block; }
+  .cam-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cam-wrap.calibrating canvas { cursor: crosshair; }
+  .cam-msg {
+    position: absolute; left: 0; right: 0; top: 0; padding: 8px; text-align: center;
+    background: rgba(0,0,0,.65); font-weight: 700; font-size: .95rem; pointer-events: none;
+  }
+  .cam-msg:empty { display: none; }
+  .camstatus { font-size: .85rem; color: var(--muted); }
+  .camstatus b { color: var(--text); }
+  .panel .small-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .panel .small-btns button { padding: 9px 6px; font-size: .85rem; background: #2c3e50; color: #fff; }
+  #camBtn { background: #8e44ad !important; }
+
+  .report {
+    width: 100%; max-width: 1100px; padding: 0 12px 30px; display: none;
+  }
+  .report.show { display: block; }
+  .report-inner { background: var(--panel); border-radius: 12px; padding: 16px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .report h2 { margin: 0 0 10px; font-size: 1.1rem; width: 100%; }
+  .heat { display: grid; grid-template-columns: repeat(3, 90px); grid-template-rows: repeat(3, 70px); gap: 3px; }
+  .heat div {
+    border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: .75rem; color: #111; font-weight: 700; background: #33443a; text-align: center;
+  }
+  .heat div .p { font-size: 1.1rem; }
+  .feedback { flex: 1 1 300px; }
+  .feedback ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+  .feedback .sets { color: var(--muted); font-size: .85rem; margin-top: 8px; }
+
   h3 { margin: 0 0 6px; font-size: .8rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 </style>
 </head>
@@ -153,6 +195,12 @@
       <div class="overlay" id="overlay"><div class="big" id="overlayBig"></div><div class="small" id="overlaySmall"></div></div>
     </div>
     <div class="hint">You stand on this side, facing the net. Tap a box to turn it on/off. Space = start/pause.</div>
+    <div class="result" id="result"></div>
+    <div class="cam-wrap" id="camWrap">
+      <video id="video" playsinline muted></video>
+      <canvas id="camCanvas"></canvas>
+      <div class="cam-msg" id="camMsg"></div>
+    </div>
   </div>
 
   <div class="panel">
@@ -203,6 +251,40 @@
         <button data-preset="sides">Side to side</button>
         <button data-preset="left">Left half</button>
       </div>
+    </div>
+
+    <div>
+      <h3>Camera coach</h3>
+      <div class="small-btns">
+        <button id="camBtn">📷 Enable camera</button>
+        <button id="calBtn" disabled>Calibrate court</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div class="ctl"><select id="camSelect" title="Camera"><option value="">Back camera</option></select></div>
+        <div class="ctl"><select id="modelSelect" title="Tracking model">
+          <option value="lite">Fast tracking</option>
+          <option value="full">Accurate tracking</option>
+        </select></div>
+      </div>
+      <div class="camstatus" id="camStatus" style="margin-top:6px">Camera off. The drill works without it.</div>
+      <div class="hint" style="text-align:left;margin-top:6px">
+        Best setup: phone on the <b>other side of the net</b>, raised, facing you, so you can see the screen and it can see your whole half court.
+        Calibrate with the court empty: tap the 4 corners of your half (singles lines, net to baseline).
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="report" id="report">
+  <div class="report-inner">
+    <h2 id="reportTitle">Coach report</h2>
+    <div>
+      <div class="heat" id="heat"></div>
+      <div class="hint">% of calls reached in time · average time</div>
+    </div>
+    <div class="feedback">
+      <ul id="feedback"></ul>
+      <div class="sets" id="setTrend"></div>
     </div>
   </div>
 </div>
@@ -322,6 +404,7 @@ function hideOverlay() { $("overlay").classList.remove("show"); }
 
 function step() {
   if (!state.running) return;
+  coachResolve();
   const sps = +$("shotsPerSet").value;
 
   // After a target, go to base if enabled
@@ -332,6 +415,7 @@ function step() {
     $("call").textContent = "Base";
     state.phase = "base";
     beep(440, 0.05);
+    coachStart(BASE, "recover", baseTime());
     schedule(step, baseTime());
     return;
   }
@@ -349,6 +433,7 @@ function step() {
   $("call").textContent = BOXES[n];
   beep(880);
   say($("showNum").checked ? String(n) : BOXES[n].replace("Centre", "centre"));
+  coachStart(n, "move", moveTime());
   schedule(step, moveTime());
 }
 
@@ -374,10 +459,11 @@ function startSet() {
 
 function endSet() {
   clearHighlights();
+  const headline = coachEndSet();
   const sets = +$("sets").value;
   if (state.set >= sets) {
     state.phase = "done";
-    say("Done. Great work.");
+    say(headline ? "Session done. " + headline : "Done. Great work.");
     showOverlay("✔", "Session complete");
     $("call").textContent = "Done";
     stop(true);
@@ -385,7 +471,7 @@ function endSet() {
   }
   let left = +$("rest").value;
   state.phase = "rest";
-  say("Rest");
+  say(headline ? "Rest. " + headline : "Rest");
   const tick = () => {
     if (!state.running) return;
     if (left <= 0) { hideOverlay(); startSet(); return; }
@@ -418,6 +504,7 @@ function start() {
 
 function stop(finished = false) {
   state.running = false;
+  coachCancel();
   clearTimeout(state.timer);
   clearInterval(state.clock);
   if (window.speechSynthesis) speechSynthesis.cancel();
@@ -438,6 +525,7 @@ function reset() {
   stop(true);
   Object.assign(state, { phase: "idle", shots: 0, set: 0, last: null, elapsed: 0, speedFactor: 1 });
   resumeFn = null;
+  coachReset();
   clearHighlights(); hideOverlay();
   $("call").textContent = "Ready";
   $("shotCount").textContent = 0;
@@ -454,6 +542,424 @@ document.addEventListener("keydown", e => {
     state.running ? stop() : start();
   }
 });
+
+// =====================================================================
+// Camera coach: pose tracking (MediaPipe) + court calibration + scoring
+// =====================================================================
+const MP_VER = "1.2.3";
+const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const MODELS = {
+  lite: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+  full: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+};
+// Court space: x 0..1 = your left -> right, y 0..1 = net -> baseline
+const CORNERS = [
+  { name: "FRONT-LEFT",  hint: "at the net, on your left",   court: [0, 0] },
+  { name: "FRONT-RIGHT", hint: "at the net, on your right",  court: [1, 0] },
+  { name: "BACK-RIGHT",  hint: "baseline, on your right",    court: [1, 1] },
+  { name: "BACK-LEFT",   hint: "baseline, on your left",     court: [0, 1] },
+];
+const STABLE_FRAMES = 2;       // frames in a box before it counts
+const LOST_MS = 800;           // no feet for this long = "can't see you"
+
+const video = $("video"), canvas = $("camCanvas"), ctx2d = canvas.getContext("2d");
+const coach = {
+  stream: null, landmarker: null, loading: false, modelName: null,
+  H: null, Hinv: null, calPts: null, calibrating: false, calTaps: [],
+  lastVideoTime: -1, lastSeen: 0, feetImg: null, feetCourt: null,
+  current: null,             // the call being tracked right now
+  set: null, sets: [], session: null,
+};
+const dot = document.createElement("div"); dot.className = "dot"; court.appendChild(dot);
+
+// ---------- Geometry ----------
+function solve(A, b) {               // Gaussian elimination, n x n
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = 0; r < n; r++) if (r !== c) {
+      const f = M[r][c] / M[c][c];
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+function homography(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  const h = solve(A, b);
+  return h ? [...h, 1] : null;
+}
+function applyH(H, [x, y]) {
+  const w = H[6] * x + H[7] * y + H[8];
+  return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
+}
+function boxAt([x, y]) {
+  if (x < -0.2 || x > 1.2 || y < -0.2 || y > 1.2) return null;   // well outside the court
+  const c = Math.min(2, Math.max(0, Math.floor(x * 3)));
+  const r = Math.min(2, Math.max(0, Math.floor(y * 3)));
+  return r * 3 + c + 1;
+}
+
+// ---------- Calibration ----------
+function setCalibration(pts) {
+  const H = homography(pts, CORNERS.map(c => c.court));
+  const Hinv = homography(CORNERS.map(c => c.court), pts);
+  if (!H || !Hinv) return false;
+  Object.assign(coach, { H, Hinv, calPts: pts });
+  try { localStorage.setItem("bft-cal", JSON.stringify(pts)); } catch (e) {}
+  return true;
+}
+function startCalibration() {
+  if (!coach.stream) return;
+  coach.calibrating = true; coach.calTaps = [];
+  $("camWrap").classList.add("calibrating");
+  calPrompt();
+}
+function calPrompt() {
+  const c = CORNERS[coach.calTaps.length];
+  $("camMsg").textContent = `Tap ${coach.calTaps.length + 1}/4: ${c.name} corner (${c.hint})`;
+}
+canvas.addEventListener("click", e => {
+  if (!coach.calibrating) return;
+  const r = canvas.getBoundingClientRect();
+  coach.calTaps.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+  if (coach.calTaps.length < 4) return calPrompt();
+  coach.calibrating = false;
+  $("camWrap").classList.remove("calibrating");
+  if (setCalibration(coach.calTaps)) {
+    $("camMsg").textContent = "";
+    updateCamStatus();
+  } else {
+    $("camMsg").textContent = "Those corners don't make a court shape. Tap Calibrate again.";
+  }
+});
+
+// ---------- Camera + model ----------
+async function enableCamera() {
+  if (coach.stream) return disableCamera();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    camStatus("This browser can't use the camera. Open the site over https in Chrome or Safari.");
+    return;
+  }
+  try {
+    camStatus("Asking for the camera…");
+    const devId = $("camSelect").value;
+    coach.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: devId ? { deviceId: { exact: devId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+                   : { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+  } catch (e) {
+    coach.stream = null;
+    camStatus("Camera blocked: " + (e.message || e.name) + ". Allow camera access for this site and try again.");
+    return;
+  }
+  video.srcObject = coach.stream;
+  await video.play().catch(() => {});
+  $("camWrap").classList.add("show");
+  $("camBtn").textContent = "📷 Camera off";
+  $("calBtn").disabled = false;
+  fillCameraList();
+  await loadModel();
+  if (!coach.H) startCalibration();
+  updateCamStatus();
+  requestAnimationFrame(loop);
+}
+function disableCamera() {
+  coach.stream?.getTracks().forEach(t => t.stop());
+  coach.stream = null;
+  video.srcObject = null;
+  $("camWrap").classList.remove("show");
+  $("camBtn").textContent = "📷 Enable camera";
+  $("calBtn").disabled = true;
+  dot.style.display = "none";
+  camStatus("Camera off. The drill works without it.");
+}
+async function fillCameraList() {
+  const sel = $("camSelect");
+  if (sel.options.length > 1) return;
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  devs.forEach((d, i) => sel.add(new Option(d.label || `Camera ${i + 1}`, d.deviceId)));
+}
+async function loadModel() {
+  const name = $("modelSelect").value;
+  if (coach.landmarker && coach.modelName === name) return;
+  coach.loading = true;
+  camStatus(`Loading tracking model (${name === "lite" ? "fast" : "accurate"})… first time can take ~10 s.`);
+  try {
+    const { FilesetResolver, PoseLandmarker } = await import(`${MP_CDN}/vision_bundle.mjs`);
+    const fileset = await FilesetResolver.forVisionTasks(`${MP_CDN}/wasm`);
+    const opts = d => ({
+      baseOptions: { modelAssetPath: MODELS[name], delegate: d },
+      runningMode: "VIDEO", numPoses: 1,
+      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+    });
+    let lm;
+    try { lm = await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
+    catch (e) { lm = await PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+    coach.landmarker?.close();
+    coach.landmarker = lm; coach.modelName = name;
+  } catch (e) {
+    camStatus("Couldn't load the tracking model: " + (e.message || e) + ". Check your internet connection.");
+  }
+  coach.loading = false;
+}
+
+// Ground contact point of one foot: average heel + toe, fall back to ankle.
+function footPoint(L, ankle, heel, toe) {
+  const ok = i => L[i] && (L[i].visibility ?? 1) > 0.4;
+  if (ok(heel) && ok(toe)) return [(L[heel].x + L[toe].x) / 2, (L[heel].y + L[toe].y) / 2];
+  if (ok(ankle)) return [L[ankle].x, L[ankle].y];
+  return null;
+}
+
+let fps = 0, fpsFrames = 0, fpsT = performance.now();
+function loop() {
+  if (!coach.stream) return;
+  requestAnimationFrame(loop);
+  if (canvas.width !== video.clientWidth || canvas.height !== video.clientHeight) {
+    canvas.width = video.clientWidth; canvas.height = video.clientHeight;
+  }
+  const now = performance.now();
+  if (coach.landmarker && !coach.loading && video.readyState >= 2 && video.currentTime !== coach.lastVideoTime) {
+    coach.lastVideoTime = video.currentTime;
+    let feet = null;
+    try {
+      const res = coach.landmarker.detectForVideo(video, now);
+      const L = res.landmarks?.[0];
+      if (L) feet = [footPoint(L, 27, 29, 31), footPoint(L, 28, 30, 32)].filter(Boolean);
+    } catch (e) {}
+    coach.feetImg = feet && feet.length ? feet : null;
+    if (coach.feetImg) coach.lastSeen = now;
+    fpsFrames++;
+    if (now - fpsT > 1000) { fps = fpsFrames; fpsFrames = 0; fpsT = now; updateCamStatus(); }
+    if (coach.H) processFeet(coach.feetImg ? coach.feetImg.map(p => applyH(coach.H, p)) : null, now);
+  }
+  draw();
+}
+
+// ---------- Scoring ----------
+// Called every frame with feet positions in court space (or null if not visible).
+function processFeet(feet, now) {
+  coach.feetCourt = feet;
+  if (!feet) { dot.style.display = "none"; }
+  else {
+    const mid = [feet.reduce((s, p) => s + p[0], 0) / feet.length, feet.reduce((s, p) => s + p[1], 0) / feet.length];
+    dot.style.display = "block";
+    dot.style.left = (Math.min(1.05, Math.max(-0.05, mid[0])) * 100) + "%";
+    dot.style.top = (Math.min(1.05, Math.max(-0.05, mid[1])) * 100) + "%";
+    feet = feet.concat([mid]);
+  }
+  const cur = coach.current;
+  if (!cur || cur.done) return;
+  if (!feet) return;
+  cur.seen = true;
+  // Moves: any foot (lunge foot counts). Recovery: the midpoint between your feet must be on base.
+  const inBox = cur.kind === "recover"
+    ? boxAt(feet[feet.length - 1]) === cur.box
+    : feet.slice(0, -1).some(p => boxAt(p) === cur.box);
+  cur.stable = inBox ? cur.stable + 1 : 0;
+  if (cur.stable >= STABLE_FRAMES) {
+    cur.done = true; cur.hit = true; cur.time = (now - cur.t0) / 1000;
+    flashBox(cur.box, "hit");
+    if (cur.kind === "move") showResult(`✔ ${BOXES[cur.box]} ${cur.time.toFixed(2)} s`, true);
+  }
+}
+function coachActive() { return !!(coach.stream && coach.H && coach.landmarker); }
+
+function coachStart(box, kind, windowMs) {
+  if (!coachActive()) { coach.current = null; return; }
+  coach.current = { box, kind, windowMs, t0: performance.now(), stable: 0, done: false, hit: false, time: null, seen: false };
+}
+function coachResolve() {
+  const cur = coach.current;
+  coach.current = null;
+  if (!cur) return;
+  // If you weren't visible at all during this call, don't count it either way.
+  if (!cur.seen && !cur.hit) { showResult("? Couldn't see you", false); return; }
+  if (!cur.hit) {
+    flashBox(cur.box, "miss");
+    beep(160, 0.18);
+    showResult(cur.kind === "move" ? `✘ Late to ${BOXES[cur.box]}` : "✘ Didn't get back to base", false);
+  }
+  record(cur);
+}
+function coachCancel() { coach.current = null; }
+
+function newStats() {
+  const s = { boxes: {}, rec: { n: 0, hit: 0, times: [] } };
+  for (let n = 1; n <= 9; n++) s.boxes[n] = { n: 0, hit: 0, times: [] };
+  return s;
+}
+function record(cur) {
+  if (!coach.set) coach.set = newStats();
+  if (!coach.session) coach.session = newStats();
+  for (const s of [coach.set, coach.session]) {
+    const b = cur.kind === "recover" ? s.rec : s.boxes[cur.box];
+    b.n++;
+    if (cur.hit) { b.hit++; b.times.push(cur.time); }
+  }
+}
+function coachReset() { coach.set = null; coach.sets = []; coach.session = null; coach.current = null; $("report").classList.remove("show"); showResult("", true); }
+
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+function summarize(s) {
+  let n = 0, hit = 0, times = [];
+  for (let b = 1; b <= 9; b++) { n += s.boxes[b].n; hit += s.boxes[b].hit; times.push(...s.boxes[b].times); }
+  return { n, hit, pct: n ? hit / n : 0, avg: avg(times) };
+}
+
+// Returns a short sentence to speak, and renders the report.
+function coachEndSet() {
+  coachResolve();
+  if (!coach.set) return "";
+  const sum = summarize(coach.set);
+  coach.sets.push(sum);
+  coach.set = null;
+  renderReport();
+  if (!sum.n) return "";
+  return `${Math.round(sum.pct * 100)} percent on time.`;
+}
+
+function renderReport() {
+  const s = coach.session;
+  if (!s) return;
+  const total = summarize(s);
+  $("report").classList.add("show");
+  $("reportTitle").textContent = `Coach report: ${coach.sets.length} set${coach.sets.length === 1 ? "" : "s"}, ${total.n} moves`;
+
+  // Heat map
+  const heat = $("heat"); heat.innerHTML = "";
+  for (let b = 1; b <= 9; b++) {
+    const d = document.createElement("div");
+    const st = b === BASE ? s.rec : s.boxes[b];
+    if (st.n) {
+      const p = st.hit / st.n;
+      d.style.background = `hsl(${Math.round(p * 120)}, 70%, 55%)`;
+      const a = avg(st.times);
+      d.innerHTML = `<span>${b === BASE ? "Recovery" : BOXES[b]}</span><span class="p">${Math.round(p * 100)}%</span><span>${a ? a.toFixed(2) + " s" : "-"} · ${st.hit}/${st.n}</span>`;
+    } else {
+      d.innerHTML = `<span style="color:#889">${b === BASE ? "Recovery" : BOXES[b]}</span><span style="color:#889">-</span>`;
+    }
+    heat.appendChild(d);
+  }
+
+  // Blunt feedback
+  const fb = [];
+  const pct = Math.round(total.pct * 100);
+  const spd = +$("speed").value;
+  if (total.n < 5) fb.push("Not enough tracked moves yet to judge. Do a full set.");
+  else if (total.pct >= 0.9) fb.push(`<b>${pct}% on time. Too easy.</b> Drop the speed to ${(spd - 0.2).toFixed(1)} s.`);
+  else if (total.pct >= 0.7) fb.push(`<b>${pct}% on time.</b> Good training speed. Stay here until you're above 90%.`);
+  else fb.push(`<b>${pct}% on time. Too fast for you right now.</b> Go up to ${(spd + 0.3).toFixed(1)} s and make every move clean before you speed up.`);
+
+  const boxes = [1,2,3,4,6,7,8,9].map(b => ({ b, ...s.boxes[b], p: s.boxes[b].n ? s.boxes[b].hit / s.boxes[b].n : null, a: avg(s.boxes[b].times) }))
+    .filter(x => x.n >= 2);
+  if (boxes.length >= 2) {
+    const worst = [...boxes].sort((x, y) => x.p - y.p || (y.a ?? 99) - (x.a ?? 99))[0];
+    const best = [...boxes].sort((x, y) => y.p - x.p || (x.a ?? 99) - (y.a ?? 99))[0];
+    if (worst.p < 1) fb.push(`Weakest: <b>${BOXES[worst.b]}</b>, ${worst.hit}/${worst.n} on time${worst.a ? `, avg ${worst.a.toFixed(2)} s` : ""}. Drill it on its own (tap boxes to turn the others off).`);
+    if (best.b !== worst.b) fb.push(`Strongest: ${BOXES[best.b]}${best.a ? ` (avg ${best.a.toFixed(2)} s)` : ""}.`);
+    const fronts = boxes.filter(x => x.b <= 3), backs = boxes.filter(x => x.b >= 7);
+    const fa = avg(fronts.flatMap(x => x.times)), ba = avg(backs.flatMap(x => x.times));
+    if (fa && ba && Math.abs(fa - ba) > 0.25) {
+      fb.push(fa > ba ? `Front court is ${(fa - ba).toFixed(2)} s slower than back. Work on your lunge: push off harder from base.`
+                      : `Back court is ${(ba - fa).toFixed(2)} s slower than front. Turn your shoulders and use chassé / crossover steps, don't backpedal.`);
+    }
+    const lefts = boxes.filter(x => [1,4,7].includes(x.b)), rights = boxes.filter(x => [3,6,9].includes(x.b));
+    const la = avg(lefts.flatMap(x => x.times)), ra = avg(rights.flatMap(x => x.times));
+    if (la && ra && Math.abs(la - ra) > 0.25) fb.push(`${la > ra ? "Left" : "Right"} side is ${Math.abs(la - ra).toFixed(2)} s slower. That's your weak side.`);
+  }
+  if (s.rec.n >= 3) {
+    const rp = s.rec.hit / s.rec.n;
+    if (rp < 0.7) fb.push(`<b>You only made it back to base ${Math.round(rp * 100)}% of the time.</b> You're cutting recovery short, which costs you on the next shot. Get back to centre every time.`);
+    else fb.push(`Recovery to base: ${Math.round(rp * 100)}%${avg(s.rec.times) ? `, avg ${avg(s.rec.times).toFixed(2)} s` : ""}.`);
+  }
+  $("feedback").innerHTML = fb.map(x => `<li>${x}</li>`).join("");
+
+  if (coach.sets.length > 1) {
+    $("setTrend").textContent = "By set: " + coach.sets.map((x, i) =>
+      `Set ${i + 1}: ${Math.round(x.pct * 100)}%${x.avg ? ` / ${x.avg.toFixed(2)} s` : ""}`).join("  ·  ");
+  } else $("setTrend").textContent = "";
+}
+
+// ---------- UI helpers ----------
+function flashBox(n, cls) {
+  const el = boxEls[n];
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 450);
+}
+function showResult(text, good) {
+  const r = $("result");
+  r.textContent = text;
+  r.className = "result " + (good ? "good" : "bad");
+}
+function camStatus(html) { $("camStatus").innerHTML = html; }
+function updateCamStatus() {
+  if (!coach.stream) return;
+  if (coach.loading) return;
+  if (!coach.landmarker) return;
+  if (!coach.H) return camStatus("<b>Calibrate the court</b> to start tracking.");
+  const seen = performance.now() - coach.lastSeen < LOST_MS;
+  camStatus(seen ? `<b>Tracking you</b> · ${fps} fps${fps && fps < 12 ? " (low: try Fast tracking)" : ""}`
+                 : `<b>Can't see your feet.</b> Get your whole body in frame · ${fps} fps`);
+}
+
+function draw() {
+  const w = canvas.width, h = canvas.height;
+  ctx2d.clearRect(0, 0, w, h);
+  const P = ([x, y]) => [x * w, y * h];
+  if (coach.calibrating) {
+    ctx2d.fillStyle = "#ffd23f";
+    coach.calTaps.forEach((p, i) => {
+      const [x, y] = P(p);
+      ctx2d.beginPath(); ctx2d.arc(x, y, 8, 0, 7); ctx2d.fill();
+      ctx2d.fillText(CORNERS[i].name, x + 10, y - 10);
+    });
+    return;
+  }
+  if (coach.Hinv) {
+    const toImg = c => P(applyH(coach.Hinv, c));
+    // highlight current call
+    const cur = coach.current;
+    if (cur) {
+      const r = Math.floor((cur.box - 1) / 3), c = (cur.box - 1) % 3;
+      const q = [[c / 3, r / 3], [(c + 1) / 3, r / 3], [(c + 1) / 3, (r + 1) / 3], [c / 3, (r + 1) / 3]].map(toImg);
+      ctx2d.fillStyle = cur.done ? "rgba(46,204,113,.4)" : (cur.kind === "recover" ? "rgba(79,195,247,.35)" : "rgba(255,210,63,.4)");
+      ctx2d.beginPath(); q.forEach(([x, y], i) => i ? ctx2d.lineTo(x, y) : ctx2d.moveTo(x, y)); ctx2d.closePath(); ctx2d.fill();
+    }
+    // grid
+    ctx2d.strokeStyle = "rgba(255,255,255,.8)"; ctx2d.lineWidth = 2;
+    for (let i = 0; i <= 3; i++) {
+      const t = i / 3;
+      for (const [a, b] of [[[t, 0], [t, 1]], [[0, t], [1, t]]]) {
+        const [x1, y1] = toImg(a), [x2, y2] = toImg(b);
+        ctx2d.beginPath(); ctx2d.moveTo(x1, y1); ctx2d.lineTo(x2, y2); ctx2d.stroke();
+      }
+    }
+  }
+  if (coach.feetImg) {
+    ctx2d.fillStyle = "#ff3d81";
+    coach.feetImg.forEach(p => { const [x, y] = P(p); ctx2d.beginPath(); ctx2d.arc(x, y, 7, 0, 7); ctx2d.fill(); });
+  }
+}
+
+$("camBtn").addEventListener("click", enableCamera);
+$("calBtn").addEventListener("click", startCalibration);
+$("modelSelect").addEventListener("change", () => { if (coach.stream) loadModel().then(updateCamStatus); });
+$("camSelect").addEventListener("change", async () => { if (coach.stream) { disableCamera(); await enableCamera(); } });
+try { const saved = JSON.parse(localStorage.getItem("bft-cal")); if (saved?.length === 4) setCalibration(saved); } catch (e) {}
+
+// Test hook: feed court-space feet directly, e.g. __coach.feed([[0.1,0.1]])
+window.__coach = { coach, processFeet, forceActive() { coach.stream = coach.stream || {}; coach.H = coach.H || [1,0,0,0,1,0,0,0,1]; coach.landmarker = coach.landmarker || {}; } };
 </script>
 </body>
 </html>
