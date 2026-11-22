@@ -149,6 +149,8 @@
     background: rgba(0,0,0,.65); font-weight: 700; font-size: .95rem; pointer-events: none;
   }
   .cam-msg:empty { display: none; }
+  .cam-error { display: none; margin-top: 8px; padding: 10px; border-radius: 8px; background: #5c1f1f; border: 1px solid #e74c3c; font-size: .9rem; line-height: 1.45; }
+  .cam-error a { color: #ffd23f; word-break: break-all; }
   .camstatus { font-size: .85rem; color: var(--muted); }
   .camstatus b { color: var(--text); }
   .panel .small-btns { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -177,7 +179,7 @@
 <body>
 
 <header>
-  <h1>🏸 Badminton Footwork Trainer</h1>
+  <h1>🏸 Badminton Footwork Trainer <small style="font-size:.6rem;color:var(--muted)">v3</small></h1>
   <p>Move to the highlighted box like the shuttle is there. Blue = recover to base.</p>
 </header>
 
@@ -197,7 +199,7 @@
     <div class="hint">You stand on this side, facing the net. Tap a box to turn it on/off. Space = start/pause.</div>
     <div class="result" id="result"></div>
     <div class="cam-wrap" id="camWrap">
-      <video id="video" playsinline muted></video>
+      <video id="video" playsinline muted autoplay></video>
       <canvas id="camCanvas"></canvas>
       <div class="cam-msg" id="camMsg"></div>
     </div>
@@ -266,6 +268,7 @@
           <option value="full">Accurate tracking</option>
         </select></div>
       </div>
+      <div id="camError" class="cam-error"></div>
       <div class="camstatus" id="camStatus" style="margin-top:6px">Camera off. The drill works without it.</div>
       <div class="hint" style="text-align:left;margin-top:6px">
         Best setup: phone on the <b>other side of the net</b>, raised, facing you, so you can see the screen and it can see your whole half court.
@@ -643,31 +646,83 @@ canvas.addEventListener("click", e => {
 });
 
 // ---------- Camera + model ----------
+function camError(html) {
+  const el = $("camError");
+  el.innerHTML = html;
+  el.style.display = html ? "block" : "none";
+  if (html) el.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+const SITE_URL = "https://pranitkothari.github.io/BadmintonPositions-/";
+
 async function enableCamera() {
   if (coach.stream) return disableCamera();
+  camError("");
+
+  // 1. Inside an embedded frame (e.g. the Claude preview link): camera is blocked by the host page.
+  let framed = false;
+  try { framed = window.self !== window.top; } catch (e) { framed = true; }
+  // 2. Not https
+  if (!window.isSecureContext) {
+    return camError(`Camera needs a secure (https) page. Open <a href="${SITE_URL}">${SITE_URL}</a>`);
+  }
+  // 3. In-app browsers (WhatsApp, Instagram, Facebook, Gmail, LinkedIn…) usually don't support the camera.
+  const ua = navigator.userAgent;
+  const inApp = /FBAN|FBAV|Instagram|Line\/|WhatsApp|LinkedInApp|GSA\/|; wv\)/i.test(ua);
   if (!navigator.mediaDevices?.getUserMedia) {
-    camStatus("This browser can't use the camera. Open the site over https in Chrome or Safari.");
+    return camError(inApp
+      ? `You're in an app's built-in browser, which can't use the camera. Tap ⋮ → <b>Open in Chrome</b>, or open <a href="${SITE_URL}">${SITE_URL}</a> directly in Chrome.`
+      : `This browser can't use the camera. Open <a href="${SITE_URL}">${SITE_URL}</a> in Chrome.`);
+  }
+
+  camStatus("Asking for the camera… tap <b>Allow</b> when your phone asks.");
+  $("camWrap").classList.add("show");
+  $("camMsg").textContent = "Waiting for camera…";
+
+  const devId = $("camSelect").value;
+  const attempts = devId
+    ? [{ deviceId: { exact: devId } }, true]
+    : [{ facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+       { facingMode: { ideal: "environment" } },
+       true];
+  let lastErr = null;
+  for (const v of attempts) {
+    try { coach.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: v }); break; }
+    catch (e) {
+      lastErr = e;
+      // Permission problems won't be fixed by trying different settings.
+      if (e.name === "NotAllowedError" || e.name === "SecurityError") break;
+    }
+  }
+
+  if (!coach.stream) {
+    $("camWrap").classList.remove("show");
+    $("camMsg").textContent = "";
+    camStatus("Camera off.");
+    const n = lastErr?.name;
+    if (framed) {
+      camError(`This preview page blocks the camera. Open the real site: <a href="${SITE_URL}" target="_blank">${SITE_URL}</a>`);
+    } else if (n === "NotAllowedError" || n === "SecurityError") {
+      camError(`<b>Camera is blocked for this site.</b> Your phone didn't ask because it remembers an earlier "Block".<br>
+           Fix in Chrome: tap the <b>icon left of the web address</b> (🔒 or ⚙) → <b>Permissions</b> → <b>Camera</b> → <b>Allow</b>, then reload the page.<br>
+           Still nothing? Android <b>Settings → Apps → Chrome → Permissions → Camera → Allow</b>.` +
+          (inApp ? `<br>You also look to be in an app's built-in browser: open the link in Chrome instead.` : ""));
+    } else if (n === "NotFoundError" || n === "OverconstrainedError") {
+      camError("No usable camera found on this device.");
+    } else if (n === "NotReadableError" || n === "AbortError") {
+      camError("Another app is using the camera. Close it (video call, camera app) and try again.");
+    } else {
+      camError(`Couldn't start the camera (${n || "unknown error"}: ${lastErr?.message || ""}).`);
+    }
     return;
   }
-  try {
-    camStatus("Asking for the camera…");
-    const devId = $("camSelect").value;
-    coach.stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: devId ? { deviceId: { exact: devId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-                   : { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-    });
-  } catch (e) {
-    coach.stream = null;
-    camStatus("Camera blocked: " + (e.message || e.name) + ". Allow camera access for this site and try again.");
-    return;
-  }
+
   video.srcObject = coach.stream;
   await video.play().catch(() => {});
-  $("camWrap").classList.add("show");
+  $("camMsg").textContent = "";
   $("camBtn").textContent = "📷 Camera off";
   $("calBtn").disabled = false;
   fillCameraList();
+  $("camWrap").scrollIntoView({ behavior: "smooth", block: "center" });
   await loadModel();
   if (!coach.H) startCalibration();
   updateCamStatus();
