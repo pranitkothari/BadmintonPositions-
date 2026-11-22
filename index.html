@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Badminton Footwork Trainer</title>
+<style>
+  :root {
+    --bg: #0f1a14;
+    --panel: #17251d;
+    --court: #1f6b3d;
+    --line: #f4f4f4;
+    --target: #ffd23f;
+    --base: #4fc3f7;
+    --text: #eef3ef;
+    --muted: #9bb3a4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  header { text-align: center; padding: 12px 10px 4px; }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+
+  .layout {
+    display: flex;
+    gap: 20px;
+    padding: 12px;
+    width: 100%;
+    max-width: 1100px;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  /* ---------- Court ---------- */
+  .court-wrap { flex: 1 1 420px; max-width: 560px; }
+  .status {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px; font-variant-numeric: tabular-nums;
+  }
+  .status .call { font-size: 1.6rem; font-weight: 700; min-height: 2rem; }
+  .status .stats { color: var(--muted); font-size: .95rem; text-align: right; }
+  .net {
+    height: 14px; margin-bottom: 4px;
+    background: repeating-linear-gradient(90deg, #ddd 0 2px, transparent 2px 8px),
+                repeating-linear-gradient(0deg, #ddd 0 2px, transparent 2px 6px);
+    border-top: 3px solid #fff; border-radius: 2px; opacity: .8;
+    position: relative;
+  }
+  .net::after {
+    content: "NET"; position: absolute; left: 50%; top: -22px; transform: translateX(-50%);
+    font-size: .7rem; letter-spacing: 3px; color: var(--muted);
+  }
+  .court {
+    position: relative;
+    aspect-ratio: 6.1 / 6.7;          /* half singles/doubles court proportions */
+    background: var(--court);
+    border: 4px solid var(--line);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+  }
+  .box {
+    border: 2px dashed rgba(255,255,255,.35);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 600; color: rgba(255,255,255,.55);
+    transition: background .12s, transform .12s;
+    user-select: none; cursor: pointer;
+    position: relative;
+  }
+  .box .num { font-size: 1.6rem; }
+  .box .lbl { font-size: .7rem; letter-spacing: 1px; text-transform: uppercase; }
+  .box.disabled { background: rgba(0,0,0,.35); color: rgba(255,255,255,.2); }
+  .box.disabled::after { content: "off"; position: absolute; bottom: 6px; font-size: .65rem; }
+  .box.target {
+    background: var(--target); color: #222; transform: scale(1.02);
+    box-shadow: 0 0 30px var(--target); z-index: 2;
+  }
+  .box.target .num::before { content: "🏸 "; }
+  .box.base-on {
+    background: var(--base); color: #052233;
+    box-shadow: 0 0 24px var(--base); z-index: 2;
+  }
+  .box.prev { background: rgba(255,210,63,.18); }
+  .hint { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 6px; }
+
+  .overlay {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(0,0,0,.6); z-index: 5; font-weight: 800;
+  }
+  .overlay.show { display: flex; }
+  .overlay .big { font-size: 5rem; }
+  .overlay .small { font-size: 1.2rem; color: var(--muted); }
+
+  /* ---------- Controls ---------- */
+  .panel {
+    flex: 0 1 340px;
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .buttons { display: flex; gap: 8px; }
+  button {
+    flex: 1; padding: 14px; font-size: 1.05rem; font-weight: 700;
+    border: none; border-radius: 10px; cursor: pointer;
+  }
+  #startBtn { background: #2ecc71; color: #062; }
+  #startBtn.running { background: #f39c12; color: #321; }
+  #resetBtn { background: #34495e; color: #fff; flex: 0 0 90px; }
+  .ctl label { display: flex; justify-content: space-between; font-size: .9rem; margin-bottom: 4px; }
+  .ctl label span { font-variant-numeric: tabular-nums; color: var(--target); font-weight: 700; }
+  input[type=range] { width: 100%; accent-color: var(--target); }
+  .row { display: flex; gap: 10px; }
+  .row .ctl { flex: 1; }
+  input[type=number], select {
+    width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #355; background: #0f1a14; color: var(--text);
+  }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: .88rem; }
+  .toggles label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .presets button { flex: 1 1 30%; padding: 8px 4px; font-size: .8rem; background: #2c3e50; color: #fff; }
+  h3 { margin: 0 0 6px; font-size: .8rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏸 Badminton Footwork Trainer</h1>
+  <p>Move to the highlighted box like the shuttle is there. Blue = recover to base.</p>
+</header>
+
+<div class="layout">
+  <div class="court-wrap">
+    <div class="status">
+      <div class="call" id="call">Ready</div>
+      <div class="stats">
+        <div>Shots: <b id="shotCount">0</b> <span id="shotTotal"></span></div>
+        <div>Time: <b id="elapsed">0:00</b> &middot; Set <b id="setNum">-</b></div>
+      </div>
+    </div>
+    <div class="net"></div>
+    <div class="court" id="court">
+      <div class="overlay" id="overlay"><div class="big" id="overlayBig"></div><div class="small" id="overlaySmall"></div></div>
+    </div>
+    <div class="hint">You stand on this side, facing the net. Tap a box to turn it on/off. Space = start/pause.</div>
+  </div>
+
+  <div class="panel">
+    <div class="buttons">
+      <button id="startBtn">Start</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="ctl">
+      <label>Speed (time per move) <span id="speedVal">2.0 s</span></label>
+      <input type="range" id="speed" min="0.6" max="5" step="0.1" value="2">
+    </div>
+
+    <div class="ctl">
+      <label>Recovery time at base <span id="baseVal">same</span></label>
+      <input type="range" id="baseSpeed" min="0" max="5" step="0.1" value="0">
+    </div>
+
+    <div>
+      <h3>Session</h3>
+      <div class="row">
+        <div class="ctl"><label>Shots / set</label><input type="number" id="shotsPerSet" min="0" value="20"></div>
+        <div class="ctl"><label>Sets</label><input type="number" id="sets" min="1" value="3"></div>
+        <div class="ctl"><label>Rest (s)</label><input type="number" id="rest" min="0" value="30"></div>
+      </div>
+      <div class="hint" style="text-align:left">Shots / set = 0 means non-stop.</div>
+    </div>
+
+    <div>
+      <h3>Options</h3>
+      <div class="toggles">
+        <label><input type="checkbox" id="returnBase" checked> Return to base</label>
+        <label><input type="checkbox" id="voice" checked> Voice callout</label>
+        <label><input type="checkbox" id="beep" checked> Beep</label>
+        <label><input type="checkbox" id="noRepeat" checked> No repeats</label>
+        <label><input type="checkbox" id="accel"> Speed up each set</label>
+        <label><input type="checkbox" id="showNum"> Call numbers</label>
+      </div>
+    </div>
+
+    <div>
+      <h3>Drill presets</h3>
+      <div class="presets">
+        <button data-preset="all">All 8</button>
+        <button data-preset="corners">4 corners</button>
+        <button data-preset="front">Front court</button>
+        <button data-preset="back">Back court</button>
+        <button data-preset="sides">Side to side</button>
+        <button data-preset="left">Left half</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Box layout from player's view (net at top):
+// 1 2 3   front
+// 4 5 6   mid     (5 = base / centre)
+// 7 8 9   back
+const BOXES = {
+  1: "Front Left",  2: "Front Centre", 3: "Front Right",
+  4: "Mid Left",    5: "Base",         6: "Mid Right",
+  7: "Back Left",   8: "Back Centre",  9: "Back Right",
+};
+const BASE = 5;
+const PRESETS = {
+  all:     [1,2,3,4,6,7,8,9],
+  corners: [1,3,7,9],
+  front:   [1,2,3],
+  back:    [7,8,9],
+  sides:   [4,6],
+  left:    [1,4,7],
+};
+
+const $ = id => document.getElementById(id);
+const court = $("court");
+const enabled = new Set(PRESETS.all);
+const boxEls = {};
+
+for (let n = 1; n <= 9; n++) {
+  const el = document.createElement("div");
+  el.className = "box";
+  el.innerHTML = `<div class="num">${n}</div><div class="lbl">${BOXES[n]}</div>`;
+  el.addEventListener("click", () => {
+    if (n === BASE) return;
+    enabled.has(n) ? enabled.delete(n) : enabled.add(n);
+    renderEnabled();
+  });
+  court.appendChild(el);
+  boxEls[n] = el;
+}
+
+function renderEnabled() {
+  for (let n = 1; n <= 9; n++) {
+    if (n === BASE) continue;
+    boxEls[n].classList.toggle("disabled", !enabled.has(n));
+  }
+}
+renderEnabled();
+
+document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
+  enabled.clear();
+  PRESETS[b.dataset.preset].forEach(n => enabled.add(n));
+  renderEnabled();
+}));
+
+// ---------- Settings display ----------
+const speed = $("speed"), baseSpeed = $("baseSpeed");
+function updateLabels() {
+  $("speedVal").textContent = (+speed.value).toFixed(1) + " s";
+  $("baseVal").textContent = +baseSpeed.value === 0 ? "same" : (+baseSpeed.value).toFixed(1) + " s";
+  const sps = +$("shotsPerSet").value;
+  $("shotTotal").textContent = sps > 0 ? `/ ${sps}` : "";
+}
+[speed, baseSpeed, $("shotsPerSet")].forEach(e => e.addEventListener("input", updateLabels));
+updateLabels();
+
+// ---------- Audio ----------
+let audioCtx;
+function beep(freq = 880, dur = 0.08) {
+  if (!$("beep").checked) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+function say(text) {
+  if (!$("voice").checked || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = Math.min(2, Math.max(1, 2.4 / +speed.value)); // talk faster when drill is faster
+  speechSynthesis.speak(u);
+}
+
+// ---------- Drill engine ----------
+const state = {
+  running: false, timer: null, phase: "idle", // idle | countdown | target | base | rest | done
+  shots: 0, set: 0, last: null, elapsed: 0, clock: null, speedFactor: 1,
+};
+
+function clearHighlights() {
+  Object.values(boxEls).forEach(el => el.classList.remove("target", "base-on", "prev"));
+}
+
+function pickTarget() {
+  let pool = [...enabled];
+  if (!$("returnBase").checked) pool.push(BASE); // centre is a valid spot when not forced back
+  if ($("noRepeat").checked && pool.length > 1) pool = pool.filter(n => n !== state.last);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function moveTime() { return +speed.value * 1000 * state.speedFactor; }
+function baseTime() { return (+baseSpeed.value || +speed.value) * 1000 * state.speedFactor; }
+
+function schedule(fn, ms) { clearTimeout(state.timer); state.timer = setTimeout(fn, ms); }
+
+function showOverlay(big, small = "") {
+  $("overlayBig").textContent = big; $("overlaySmall").textContent = small;
+  $("overlay").classList.add("show");
+}
+function hideOverlay() { $("overlay").classList.remove("show"); }
+
+function step() {
+  if (!state.running) return;
+  const sps = +$("shotsPerSet").value;
+
+  // After a target, go to base if enabled
+  if (state.phase === "target" && $("returnBase").checked) {
+    clearHighlights();
+    if (state.last) boxEls[state.last].classList.add("prev");
+    boxEls[BASE].classList.add("base-on");
+    $("call").textContent = "Base";
+    state.phase = "base";
+    beep(440, 0.05);
+    schedule(step, baseTime());
+    return;
+  }
+
+  // Set finished?
+  if (sps > 0 && state.shots >= sps) return endSet();
+
+  const n = pickTarget();
+  if (n === undefined) { stop(); $("call").textContent = "Turn on some boxes"; return; }
+  clearHighlights();
+  if (state.last && state.last !== n) boxEls[state.last].classList.add("prev");
+  boxEls[n].classList.add(n === BASE ? "base-on" : "target");
+  state.last = n; state.shots++; state.phase = "target";
+  $("shotCount").textContent = state.shots;
+  $("call").textContent = BOXES[n];
+  beep(880);
+  say($("showNum").checked ? String(n) : BOXES[n].replace("Centre", "centre"));
+  schedule(step, moveTime());
+}
+
+function countdown(n, then) {
+  if (!state.running) return;
+  if (n === 0) { hideOverlay(); then(); return; }
+  showOverlay(n, `Set ${state.set} of ${$("sets").value}`);
+  beep(n === 1 ? 1000 : 600, 0.12);
+  schedule(() => countdown(n - 1, then), 1000);
+}
+
+function startSet() {
+  state.set++;
+  state.shots = 0; state.last = null; state.phase = "countdown";
+  if ($("accel").checked) state.speedFactor = Math.pow(0.85, state.set - 1);
+  $("setNum").textContent = `${state.set}/${$("sets").value}`;
+  $("shotCount").textContent = 0;
+  clearHighlights();
+  boxEls[BASE].classList.add("base-on");
+  $("call").textContent = "Get ready on base";
+  countdown(3, step);
+}
+
+function endSet() {
+  clearHighlights();
+  const sets = +$("sets").value;
+  if (state.set >= sets) {
+    state.phase = "done";
+    say("Done. Great work.");
+    showOverlay("✔", "Session complete");
+    $("call").textContent = "Done";
+    stop(true);
+    return;
+  }
+  let left = +$("rest").value;
+  state.phase = "rest";
+  say("Rest");
+  const tick = () => {
+    if (!state.running) return;
+    if (left <= 0) { hideOverlay(); startSet(); return; }
+    showOverlay(left, "Rest — next set coming");
+    $("call").textContent = "Rest";
+    if (left <= 3) beep(500, 0.05);
+    left--;
+    schedule(tick, 1000);
+  };
+  tick();
+}
+
+// pause/resume bookkeeping
+let resumeFn = null;
+
+function start() {
+  if (state.phase === "done") reset();
+  state.running = true;
+  $("startBtn").textContent = "Pause";
+  $("startBtn").classList.add("running");
+  state.clock = setInterval(() => {
+    if (state.phase !== "rest" && state.phase !== "countdown") {
+      state.elapsed++;
+      $("elapsed").textContent = `${Math.floor(state.elapsed / 60)}:${String(state.elapsed % 60).padStart(2, "0")}`;
+    }
+  }, 1000);
+  if (resumeFn) { const f = resumeFn; resumeFn = null; hideOverlay(); f(); }
+  else startSet();
+}
+
+function stop(finished = false) {
+  state.running = false;
+  clearTimeout(state.timer);
+  clearInterval(state.clock);
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  $("startBtn").textContent = finished ? "Start again" : "Resume";
+  $("startBtn").classList.remove("running");
+  if (!finished && state.phase !== "idle") {
+    // resume: if resting or counting down, restart that set's countdown; otherwise continue moves
+    if (state.phase === "rest" || state.phase === "countdown") {
+      resumeFn = () => { state.set--; startSet(); };
+    } else {
+      resumeFn = () => countdown(3, step);
+    }
+    showOverlay("❚❚", "Paused");
+  }
+}
+
+function reset() {
+  stop(true);
+  Object.assign(state, { phase: "idle", shots: 0, set: 0, last: null, elapsed: 0, speedFactor: 1 });
+  resumeFn = null;
+  clearHighlights(); hideOverlay();
+  $("call").textContent = "Ready";
+  $("shotCount").textContent = 0;
+  $("elapsed").textContent = "0:00";
+  $("setNum").textContent = "-";
+  $("startBtn").textContent = "Start";
+}
+
+$("startBtn").addEventListener("click", () => state.running ? stop() : start());
+$("resetBtn").addEventListener("click", reset);
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && e.target.tagName !== "INPUT") {
+    e.preventDefault();
+    state.running ? stop() : start();
+  }
+});
+</script>
+</body>
+</html>
