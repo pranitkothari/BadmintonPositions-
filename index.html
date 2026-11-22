@@ -179,7 +179,7 @@
 <body>
 
 <header>
-  <h1>🏸 Badminton Footwork Trainer <small style="font-size:.6rem;color:var(--muted)">v3</small></h1>
+  <h1>🏸 Badminton Footwork Trainer <small style="font-size:.6rem;color:var(--muted)">v4</small></h1>
   <p>Move to the highlighted box like the shuttle is there. Blue = recover to base.</p>
 </header>
 
@@ -223,10 +223,11 @@
 
     <div>
       <h3>Session</h3>
-      <div class="row">
+      <div class="row" style="align-items:flex-end">
         <div class="ctl"><label>Shots / set</label><input type="number" id="shotsPerSet" min="0" value="20"></div>
         <div class="ctl"><label>Sets</label><input type="number" id="sets" min="1" value="3"></div>
         <div class="ctl"><label>Rest (s)</label><input type="number" id="rest" min="0" value="30"></div>
+        <div class="ctl"><label>Start delay (s)</label><input type="number" id="startDelay" min="3" value="10"></div>
       </div>
       <div class="hint" style="text-align:left">Shots / set = 0 means non-stop.</div>
     </div>
@@ -443,12 +444,16 @@ function step() {
 function countdown(n, then) {
   if (!state.running) return;
   if (n === 0) { hideOverlay(); then(); return; }
-  showOverlay(n, `Set ${state.set} of ${$("sets").value}`);
-  beep(n === 1 ? 1000 : 600, 0.12);
+  showOverlay(n, n > 3 ? "Get to base" : `Set ${state.set} of ${$("sets").value}`);
+  if (n <= 3) beep(n === 1 ? 1000 : 600, 0.12);
+  else beep(400, 0.03);
   schedule(() => countdown(n - 1, then), 1000);
 }
 
-function startSet() {
+// Time to walk from the phone to base after pressing Start / Resume.
+function startDelay() { return Math.max(3, Math.round(+$("startDelay").value) || 10); }
+
+function startSet(delay = 3) {
   state.set++;
   state.shots = 0; state.last = null; state.phase = "countdown";
   if ($("accel").checked) state.speedFactor = Math.pow(0.85, state.set - 1);
@@ -457,7 +462,8 @@ function startSet() {
   clearHighlights();
   boxEls[BASE].classList.add("base-on");
   $("call").textContent = "Get ready on base";
-  countdown(3, step);
+  if (delay > 3) say(`Starting in ${delay} seconds`);
+  countdown(delay, step);
 }
 
 function endSet() {
@@ -502,7 +508,7 @@ function start() {
     }
   }, 1000);
   if (resumeFn) { const f = resumeFn; resumeFn = null; hideOverlay(); f(); }
-  else startSet();
+  else startSet(startDelay());
 }
 
 function stop(finished = false) {
@@ -516,9 +522,9 @@ function stop(finished = false) {
   if (!finished && state.phase !== "idle") {
     // resume: if resting or counting down, restart that set's countdown; otherwise continue moves
     if (state.phase === "rest" || state.phase === "countdown") {
-      resumeFn = () => { state.set--; startSet(); };
+      resumeFn = () => { state.set--; startSet(startDelay()); };
     } else {
-      resumeFn = () => countdown(3, step);
+      resumeFn = () => { say(`Resuming in ${startDelay()} seconds`); countdown(startDelay(), step); };
     }
     showOverlay("❚❚", "Paused");
   }
